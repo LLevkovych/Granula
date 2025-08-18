@@ -92,8 +92,7 @@ class ProcessingManager:
 		session.add(file)
 		await session.commit()
 
-		# Kick off a non-blocking estimation of total_chunks
-		asyncio.create_task(self._estimate_total_chunks_bg(file.id, file.path, chunk_size))
+		# Skip background estimation to reduce DB write contention on SQLite
 
 		with open(file.path, "rb") as fb:
 			text = io.TextIOWrapper(fb, encoding="utf-8", newline="")
@@ -140,7 +139,18 @@ class ProcessingManager:
 		# increment total chunks progressively for better status reporting
 		file.total_chunks = max(file.total_chunks, index + 1)
 		session.add(file)
-		await session.commit()
+		# Commit with retries on sqlite 'database is locked'
+		max_attempts = 5
+		for attempt in range(1, max_attempts + 1):
+			try:
+				await session.commit()
+				break
+			except Exception as e:
+				emsg = str(e).lower()
+				if "database is locked" in emsg and attempt < max_attempts:
+					await asyncio.sleep(0.2 * attempt)
+					continue
+				raise
 
 	async def _worker_loop(self) -> None:
 		while True:
