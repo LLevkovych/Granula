@@ -25,7 +25,7 @@ class ChunkTask:
 
 class ProcessingManager:
 	def __init__(self) -> None:
-		self.queue: "asyncio.PriorityQueue[tuple[int, ChunkTask]]" = asyncio.PriorityQueue()
+		self.queue: "asyncio.PriorityQueue[tuple[int, int, ChunkTask]]" = asyncio.PriorityQueue()
 		self.semaphore = asyncio.Semaphore(settings.MAX_CONCURRENCY)
 		self.workers: list[asyncio.Task] = []
 		self._started = False
@@ -85,7 +85,7 @@ class ProcessingManager:
 					# tail chunk
 					if current_chunk_rows > 0:
 						await self._create_chunk(session, file, chunk_index, current_chunk_start_cookie, current_chunk_rows)
-						await self.queue.put((0, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
+						await self.queue.put((0, chunk_index, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
 						chunk_index += 1
 					break
 
@@ -96,7 +96,7 @@ class ProcessingManager:
 
 				if current_chunk_rows >= chunk_size:
 					await self._create_chunk(session, file, chunk_index, current_chunk_start_cookie, current_chunk_rows)
-					await self.queue.put((0, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
+					await self.queue.put((0, chunk_index, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
 					chunk_index += 1
 					current_chunk_rows = 0
 					# next chunk will start from the next row; continue
@@ -119,7 +119,7 @@ class ProcessingManager:
 
 	async def _worker_loop(self) -> None:
 		while True:
-			priority, task = await self.queue.get()
+			priority, _, task = await self.queue.get()
 			try:
 				async with self.semaphore:
 					await self._process_task(task)
@@ -211,7 +211,7 @@ class ProcessingManager:
 				if task.attempts < settings.MAX_RETRIES:
 					backoff = min(settings.MAX_BACKOFF, settings.BASE_BACKOFF * (2 ** (task.attempts - 1)))
 					await asyncio.sleep(backoff)
-					await self.queue.put((task.priority, task))
+					await self.queue.put((task.priority, task.chunk_index, task))
 				else:
 					pass
 			finally:
