@@ -26,7 +26,11 @@ class ChunkTask:
 class ProcessingManager:
 	def __init__(self) -> None:
 		self.queue: "asyncio.PriorityQueue[tuple[int, int, ChunkTask]]" = asyncio.PriorityQueue()
-		self.semaphore = asyncio.Semaphore(settings.MAX_CONCURRENCY)
+		# Reduce concurrency for SQLite to avoid writer lock contention
+		concurrency = settings.MAX_CONCURRENCY
+		if settings.DATABASE_URL.startswith("sqlite"):
+			concurrency = 1
+		self.semaphore = asyncio.Semaphore(concurrency)
 		self.workers: list[asyncio.Task] = []
 		self._started = False
 
@@ -52,6 +56,21 @@ class ProcessingManager:
 			return cnt
 		return await asyncio.to_thread(_count)
 
+	async def _estimate_total_chunks_bg(self, file_id: str, path: str, chunk_size: int) -> None:
+		from app.db.session import AsyncSessionLocal
+		try:
+			lines = await self._count_lines_in_thread(path)
+			estimate = math.ceil(lines / chunk_size) if lines > 0 else 0
+			async with AsyncSessionLocal() as s:
+				file = await s.get(File, file_id)
+				if not file:
+					return
+				file.total_chunks = max(file.total_chunks, estimate)
+				s.add(file)
+				await s.commit()
+		except Exception:
+			return
+
 	async def enqueue_file(self, session: AsyncSession, file: File) -> None:
 		# Initialize by scanning the file once and creating chunk tasks based on CSV row boundaries
 		chunk_size = settings.CHUNK_SIZE
@@ -62,16 +81,8 @@ class ProcessingManager:
 		session.add(file)
 		await session.commit()
 
-		# Pre-compute total chunks for better status reporting (non-blocking thread)
-		try:
-			lines = await self._count_lines_in_thread(file.path)
-			total_chunks_estimate = math.ceil(lines / chunk_size) if lines > 0 else 0
-			file.total_chunks = total_chunks_estimate
-			session.add(file)
-			await session.commit()
-		except Exception:
-			# If counting fails, proceed without estimate
-			pass
+		# Kick off a non-blocking estimation of total_chunks
+		asyncio.create_task(self._estimate_total_chunks_bg(file.id, file.path, chunk_size))
 
 		with open(file.path, "r", newline="", encoding="utf-8") as f:
 			reader = csv.reader(f)
@@ -113,7 +124,7 @@ class ProcessingManager:
 		)
 		session.add(chunk)
 		# increment total chunks progressively for better status reporting
-		file.total_chunks = index + 1
+		file.total_chunks = max(file.total_chunks, index + 1)
 		session.add(file)
 		await session.commit()
 
