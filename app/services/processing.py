@@ -136,8 +136,11 @@ class ProcessingManager:
 			await session.commit()
 
 			try:
+				file_obj = await session.get(File, task.file_id)
+				if not file_obj or not file_obj.path:
+					raise FileNotFoundError("File path not found for processing")
 				rows = await self._read_rows_in_thread(
-					path=(await session.get(File, task.file_id)).path if True else "",
+					path=file_obj.path,
 					start_cookie=task.start_cookie,
 					num_rows=task.num_rows,
 				)

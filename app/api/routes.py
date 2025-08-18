@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, File as UploadFileParam, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+import asyncio
 
-from app.db.session import get_session
+from app.db.session import get_session, AsyncSessionLocal
 from app.db.models import File, ProcessedRecord
 from app.schemas.files import UploadResponse, FileStatusResponse, ResultsResponse, ResultRecord
 from app.services.storage import save_upload
@@ -19,14 +20,24 @@ async def health() -> dict:
 
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload(file: UploadFile = UploadFileParam(...), session: AsyncSession = Depends(get_session)) -> UploadResponse:
-	file_id, path, original_name = await save_upload(file)
-	entity = File(id=file_id, filename=original_name, path=path, status="queued")
-	session.add(entity)
-	await session.commit()
+	try:
+		file_id, path, original_name = await save_upload(file)
+		entity = File(id=file_id, filename=original_name, path=path, status="queued")
+		session.add(entity)
+		await session.commit()
+	except Exception as e:
+		raise HTTPException(status_code=400, detail=f"Upload failed: {e}")
 
-	await processing_manager.start()
-	await processing_manager.enqueue_file(session, entity)
+	# Start processing in background with a fresh session
+	async def _start_processing(fid: str) -> None:
+		async with AsyncSessionLocal() as s:
+			f = await s.get(File, fid)
+			if f is None:
+				return
+			await processing_manager.start()
+			await processing_manager.enqueue_file(s, f)
 
+	asyncio.create_task(_start_processing(file_id))
 	return UploadResponse(file_id=file_id)
 
 
