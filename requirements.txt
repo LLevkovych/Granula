@@ -7,4 +7,5 @@ python-multipart>=0.0.6,<0.0.10
 alembic>=1.13,<2.0
 httpx>=0.24,<0.28
 pytest==7.4.4
-pytest-asyncio==0.21.1 
+pytest-asyncio==0.21.1
+asyncpg>=0.29,<0.30 
