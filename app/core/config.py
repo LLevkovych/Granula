@@ -33,6 +33,11 @@ class Settings:
 		# CORS: comma-separated origins; use "*" to allow all
 		cors = os.getenv("CORS_ORIGINS", "*").split(",")
 		self.CORS_ORIGINS = [o.strip() for o in cors if o.strip()]
+		# Upload constraints
+		self.MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+		self.ALLOWED_CONTENT_TYPES = [
+			ct.strip() for ct in os.getenv("ALLOWED_CONTENT_TYPES", "text/csv,application/csv").split(",") if ct.strip()
+		]
 
 
 settings = Settings() 

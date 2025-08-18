@@ -75,7 +75,7 @@ class ProcessingManager:
 		except Exception:
 			return
 
-	async def enqueue_file(self, session: AsyncSession, file: File) -> None:
+	async def enqueue_file(self, session: AsyncSession, file: File, priority: int = 0) -> None:
 		# Initialize by scanning the file once and creating chunk tasks based on CSV row boundaries
 		chunk_size = settings.CHUNK_SIZE
 		chunk_index = 0
@@ -101,7 +101,7 @@ class ProcessingManager:
 					# tail chunk
 					if current_chunk_rows > 0:
 						await self._create_chunk(session, file, chunk_index, current_chunk_start_cookie, current_chunk_rows)
-						await self.queue.put((0, chunk_index, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
+						await self.queue.put((priority, chunk_index, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows, priority=priority)))
 						logger.info("enqueued tail chunk", extra={"file_id": file.id, "chunk_index": chunk_index, "rows": current_chunk_rows})
 						chunk_index += 1
 					break
@@ -113,7 +113,7 @@ class ProcessingManager:
 
 				if current_chunk_rows >= chunk_size:
 					await self._create_chunk(session, file, chunk_index, current_chunk_start_cookie, current_chunk_rows)
-					await self.queue.put((0, chunk_index, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
+					await self.queue.put((priority, chunk_index, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows, priority=priority)))
 					logger.info("enqueued chunk", extra={"file_id": file.id, "chunk_index": chunk_index, "rows": current_chunk_rows})
 					chunk_index += 1
 					current_chunk_rows = 0
