@@ -3,6 +3,7 @@ import csv
 import uuid
 import math
 import logging
+import io
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, timezone
@@ -87,12 +88,13 @@ class ProcessingManager:
 		# Kick off a non-blocking estimation of total_chunks
 		asyncio.create_task(self._estimate_total_chunks_bg(file.id, file.path, chunk_size))
 
-		with open(file.path, "r", newline="", encoding="utf-8") as f:
-			reader = csv.reader(f)
+		with open(file.path, "rb") as fb:
+			text = io.TextIOWrapper(fb, encoding="utf-8", newline="")
+			reader = csv.reader(text)
 			current_chunk_rows = 0
-			current_chunk_start_cookie = f.tell()
+			current_chunk_start_cookie = fb.tell()
 			while True:
-				cookie_before = f.tell()
+				cookie_before = fb.tell()
 				try:
 					row = next(reader)
 				except StopIteration:
@@ -148,9 +150,10 @@ class ProcessingManager:
 
 	async def _read_rows_in_thread(self, path: str, start_cookie: int, num_rows: int) -> list[list[str]]:
 		def _read() -> list[list[str]]:
-			with open(path, "r", newline="", encoding="utf-8") as f:
-				f.seek(start_cookie)
-				reader = csv.reader(f)
+			with open(path, "rb") as fb:
+				fb.seek(start_cookie)
+				text = io.TextIOWrapper(fb, encoding="utf-8", newline="")
+				reader = csv.reader(text)
 				rows: list[list[str]] = []
 				for _ in range(num_rows):
 					try:
