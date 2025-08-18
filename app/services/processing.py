@@ -2,6 +2,7 @@ import asyncio
 import csv
 import uuid
 import math
+import logging
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, timezone
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models import Chunk, File, ProcessedRecord
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -97,6 +100,7 @@ class ProcessingManager:
 					if current_chunk_rows > 0:
 						await self._create_chunk(session, file, chunk_index, current_chunk_start_cookie, current_chunk_rows)
 						await self.queue.put((0, chunk_index, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
+						logger.info("enqueued tail chunk", extra={"file_id": file.id, "chunk_index": chunk_index, "rows": current_chunk_rows})
 						chunk_index += 1
 					break
 
@@ -108,6 +112,7 @@ class ProcessingManager:
 				if current_chunk_rows >= chunk_size:
 					await self._create_chunk(session, file, chunk_index, current_chunk_start_cookie, current_chunk_rows)
 					await self.queue.put((0, chunk_index, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
+					logger.info("enqueued chunk", extra={"file_id": file.id, "chunk_index": chunk_index, "rows": current_chunk_rows})
 					chunk_index += 1
 					current_chunk_rows = 0
 					# next chunk will start from the next row; continue
@@ -205,7 +210,8 @@ class ProcessingManager:
 					session.add(file)
 
 				await session.commit()
-			except Exception:
+				logger.info("chunk completed", extra={"file_id": task.file_id, "chunk_index": task.chunk_index, "rows": len(rows)})
+			except Exception as e:
 				await session.rollback()
 				task.attempts += 1
 				chunk.attempts = task.attempts
@@ -218,6 +224,7 @@ class ProcessingManager:
 					session.add(file)
 
 				await session.commit()
+				logger.exception("chunk failed", extra={"file_id": task.file_id, "chunk_index": task.chunk_index, "attempts": task.attempts})
 
 				if task.attempts < settings.MAX_RETRIES:
 					backoff = min(settings.MAX_BACKOFF, settings.BASE_BACKOFF * (2 ** (task.attempts - 1)))
