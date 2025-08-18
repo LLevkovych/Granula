@@ -80,9 +80,7 @@ class ProcessingManager:
 					current_chunk_rows = 0
 					# next chunk will start from the next row; continue
 
-		file.total_chunks = chunk_index
-		session.add(file)
-		await session.commit()
+		# total_chunks already updated progressively in _create_chunk
 
 	async def _create_chunk(self, session: AsyncSession, file: File, index: int, start_cookie: int, num_rows: int) -> None:
 		chunk = Chunk(
@@ -93,6 +91,9 @@ class ProcessingManager:
 			result_meta={"start_cookie": start_cookie, "num_rows": num_rows},
 		)
 		session.add(chunk)
+		# increment total chunks progressively for better status reporting
+		file.total_chunks = index + 1
+		session.add(file)
 		await session.commit()
 
 	async def _worker_loop(self) -> None:
