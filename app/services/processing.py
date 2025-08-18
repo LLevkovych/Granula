@@ -1,9 +1,10 @@
 import asyncio
 import csv
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Optional
+from datetime import datetime, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -14,7 +15,8 @@ from app.db.models import Chunk, File, ProcessedRecord
 class ChunkTask:
 	file_id: str
 	chunk_index: int
-	rows: List[list[str]]
+	start_cookie: int
+	num_rows: int
 	attempts: int = 0
 	priority: int = 0
 
@@ -40,10 +42,10 @@ class ProcessingManager:
 		self._started = False
 
 	async def enqueue_file(self, session: AsyncSession, file: File) -> None:
-		# Initialize by scanning the file and creating chunk tasks
+		# Initialize by scanning the file once and creating chunk tasks based on CSV row boundaries
 		chunk_size = settings.CHUNK_SIZE
 		chunk_index = 0
-		
+
 		# Update file status
 		file.status = "processing"
 		session.add(file)
@@ -51,26 +53,44 @@ class ProcessingManager:
 
 		with open(file.path, "r", newline="", encoding="utf-8") as f:
 			reader = csv.reader(f)
-			buffer: list[list[str]] = []
-			for row in reader:
-				buffer.append(row)
-				if len(buffer) >= chunk_size:
-					await self._create_chunk(session, file, chunk_index, buffer)
-					await self.queue.put((0, ChunkTask(file.id, chunk_index, buffer)))
+			current_chunk_rows = 0
+			current_chunk_start_cookie = f.tell()
+			while True:
+				cookie_before = f.tell()
+				try:
+					row = next(reader)
+				except StopIteration:
+					# tail chunk
+					if current_chunk_rows > 0:
+						await self._create_chunk(session, file, chunk_index, current_chunk_start_cookie, current_chunk_rows)
+						await self.queue.put((0, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
+						chunk_index += 1
+					break
+
+				# start of a new chunk
+				if current_chunk_rows == 0:
+					current_chunk_start_cookie = cookie_before
+				current_chunk_rows += 1
+
+				if current_chunk_rows >= chunk_size:
+					await self._create_chunk(session, file, chunk_index, current_chunk_start_cookie, current_chunk_rows)
+					await self.queue.put((0, ChunkTask(file.id, chunk_index, current_chunk_start_cookie, current_chunk_rows)))
 					chunk_index += 1
-					buffer = []
-			# Tail
-			if buffer:
-				await self._create_chunk(session, file, chunk_index, buffer)
-				await self.queue.put((0, ChunkTask(file.id, chunk_index, buffer)))
-				chunk_index += 1
+					current_chunk_rows = 0
+					# next chunk will start from the next row; continue
 
 		file.total_chunks = chunk_index
 		session.add(file)
 		await session.commit()
 
-	async def _create_chunk(self, session: AsyncSession, file: File, index: int, rows: list[list[str]]) -> None:
-		chunk = Chunk(file_id=file.id, index=index, status="queued", attempts=0)
+	async def _create_chunk(self, session: AsyncSession, file: File, index: int, start_cookie: int, num_rows: int) -> None:
+		chunk = Chunk(
+			file_id=file.id,
+			index=index,
+			status="queued",
+			attempts=0,
+			result_meta={"start_cookie": start_cookie, "num_rows": num_rows},
+		)
 		session.add(chunk)
 		await session.commit()
 
@@ -82,10 +102,24 @@ class ProcessingManager:
 					await self._process_task(task)
 			except asyncio.CancelledError:
 				raise
-			except Exception as e:
+			except Exception:
 				await asyncio.sleep(0)
 			finally:
 				self.queue.task_done()
+
+	async def _read_rows_in_thread(self, path: str, start_cookie: int, num_rows: int) -> list[list[str]]:
+		def _read() -> list[list[str]]:
+			with open(path, "r", newline="", encoding="utf-8") as f:
+				f.seek(start_cookie)
+				reader = csv.reader(f)
+				rows: list[list[str]] = []
+				for _ in range(num_rows):
+					try:
+						rows.append(next(reader))
+					except StopIteration:
+						break
+				return rows
+		return await asyncio.to_thread(_read)
 
 	async def _process_task(self, task: ChunkTask) -> None:
 		from app.db.session import AsyncSessionLocal
@@ -102,9 +136,20 @@ class ProcessingManager:
 			await session.commit()
 
 			try:
-				# Business logic placeholder: convert rows to simple records
-				items = [ProcessedRecord(file_id=task.file_id, chunk_index=task.chunk_index, data={"row": r}) for r in task.rows]
-				session.add_all(items)
+				rows = await self._read_rows_in_thread(
+					path=(await session.get(File, task.file_id)).path if True else "",
+					start_cookie=task.start_cookie,
+					num_rows=task.num_rows,
+				)
+
+				# Batch insert
+				now = datetime.now(timezone.utc)
+				payload = [
+					{"file_id": task.file_id, "chunk_index": task.chunk_index, "data": {"row": r}, "created_at": now}
+					for r in rows
+				]
+				if payload:
+					await session.execute(insert(ProcessedRecord), payload)
 				await session.commit()
 
 				chunk.status = "completed"
@@ -117,7 +162,7 @@ class ProcessingManager:
 					session.add(file)
 
 				await session.commit()
-			except Exception as e:
+			except Exception:
 				await session.rollback()
 				task.attempts += 1
 				chunk.attempts = task.attempts
