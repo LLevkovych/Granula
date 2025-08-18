@@ -1,0 +1,7 @@
+fastapi>=0.111,<0.116
+uvicorn[standard]>=0.23,<0.31
+sqlalchemy>=2.0,<2.1
+aiofiles>=23.2,<24.0
+aiosqlite>=0.19,<0.21
+python-multipart>=0.0.6,<0.0.10
+alembic>=1.13,<2.0 
