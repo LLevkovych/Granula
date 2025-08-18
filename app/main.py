@@ -8,6 +8,7 @@ from app.services.processing import processing_manager
 from app.core.config import settings
 from sqlalchemy import update, select
 from app.db.models import Chunk, File
+import os
 
 
 async def create_db_and_tables() -> None:
@@ -24,6 +25,12 @@ async def recover_and_resume() -> None:
 		res = await s.execute(select(File).where(File.status.in_(["processing", "queued"])) )
 		files = res.scalars().all()
 		for f in files:
+			if not f.path or not os.path.exists(f.path):
+				f.status = "failed"
+				f.error_message = "file not found on disk"
+				s.add(f)
+				await s.commit()
+				continue
 			await processing_manager.enqueue_file(s, f)
 
 

@@ -77,6 +77,13 @@ class ProcessingManager:
 
 	async def enqueue_file(self, session: AsyncSession, file: File, priority: int = 0) -> None:
 		# Initialize by scanning the file once and creating chunk tasks based on CSV row boundaries
+		import os
+		if not file.path or not os.path.exists(file.path):
+			file.status = "failed"
+			file.error_message = "file not found on disk"
+			session.add(file)
+			await session.commit()
+			return
 		chunk_size = settings.CHUNK_SIZE
 		chunk_index = 0
 
