@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import uuid
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, timezone
@@ -148,7 +149,13 @@ class ProcessingManager:
 				# Batch insert
 				now = datetime.now(timezone.utc)
 				payload = [
-					{"file_id": task.file_id, "chunk_index": task.chunk_index, "data": {"row": r}, "created_at": now}
+					{
+						"id": str(uuid.uuid4()),
+						"file_id": task.file_id,
+						"chunk_index": task.chunk_index,
+						"data": {"row": r},
+						"created_at": now,
+					}
 					for r in rows
 				]
 				if payload:
