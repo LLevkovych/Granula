@@ -62,16 +62,16 @@ class ProcessingManager:
 		session.add(file)
 		await session.commit()
 
-	# Pre-compute total chunks for better status reporting (non-blocking thread)
-	try:
-		lines = await self._count_lines_in_thread(file.path)
-		total_chunks_estimate = math.ceil(lines / chunk_size) if lines > 0 else 0
-		file.total_chunks = total_chunks_estimate
-		session.add(file)
-		await session.commit()
-	except Exception:
-		# If counting fails, proceed without estimate
-		pass
+		# Pre-compute total chunks for better status reporting (non-blocking thread)
+		try:
+			lines = await self._count_lines_in_thread(file.path)
+			total_chunks_estimate = math.ceil(lines / chunk_size) if lines > 0 else 0
+			file.total_chunks = total_chunks_estimate
+			session.add(file)
+			await session.commit()
+		except Exception:
+			# If counting fails, proceed without estimate
+			pass
 
 		with open(file.path, "r", newline="", encoding="utf-8") as f:
 			reader = csv.reader(f)
