@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import uuid
+import math
 from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, timezone
@@ -42,6 +43,15 @@ class ProcessingManager:
 		self.workers.clear()
 		self._started = False
 
+	async def _count_lines_in_thread(self, path: str) -> int:
+		def _count() -> int:
+			cnt = 0
+			with open(path, "r", encoding="utf-8", newline="") as f:
+				for _ in f:
+					cnt += 1
+			return cnt
+		return await asyncio.to_thread(_count)
+
 	async def enqueue_file(self, session: AsyncSession, file: File) -> None:
 		# Initialize by scanning the file once and creating chunk tasks based on CSV row boundaries
 		chunk_size = settings.CHUNK_SIZE
@@ -51,6 +61,17 @@ class ProcessingManager:
 		file.status = "processing"
 		session.add(file)
 		await session.commit()
+
+	# Pre-compute total chunks for better status reporting (non-blocking thread)
+	try:
+		lines = await self._count_lines_in_thread(file.path)
+		total_chunks_estimate = math.ceil(lines / chunk_size) if lines > 0 else 0
+		file.total_chunks = total_chunks_estimate
+		session.add(file)
+		await session.commit()
+	except Exception:
+		# If counting fails, proceed without estimate
+		pass
 
 		with open(file.path, "r", newline="", encoding="utf-8") as f:
 			reader = csv.reader(f)
