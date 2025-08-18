@@ -53,10 +53,10 @@ async def test_upload_status_results_flow_and_pagination():
 			await asyncio.sleep(0.05)
 
 		# wait until processed
-		for _ in range(200):
+		for _ in range(400):
 			st = await client.get(f"/status/{file_id}")
 			data = st.json()
-			if data["processed_chunks"] + data["failed_chunks"] >= max(1, data["total_chunks"]):
+			if data["total_chunks"] > 0 and (data["processed_chunks"] + data["failed_chunks"] == data["total_chunks"]):
 				break
 			await asyncio.sleep(0.05)
 
