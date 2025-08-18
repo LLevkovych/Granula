@@ -147,7 +147,15 @@ class ProcessingManager:
 				break
 			except Exception as e:
 				emsg = str(e).lower()
+				# rollback the failed transaction to clear pending state
+				try:
+					await session.rollback()
+				except Exception:
+					pass
 				if "database is locked" in emsg and attempt < max_attempts:
+					# re-add entities after rollback before retry
+					session.add(chunk)
+					session.add(file)
 					await asyncio.sleep(0.2 * attempt)
 					continue
 				raise
