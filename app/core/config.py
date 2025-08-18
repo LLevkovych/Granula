@@ -30,6 +30,9 @@ class Settings:
 		self.BASE_BACKOFF = float(os.getenv("BASE_BACKOFF", "1.0"))
 		self.MAX_BACKOFF = float(os.getenv("MAX_BACKOFF", "30.0"))
 		self.DELETE_FILE_ON_COMPLETE = os.getenv("DELETE_FILE_ON_COMPLETE", "false").lower() == "true"
+		# CORS: comma-separated origins; use "*" to allow all
+		cors = os.getenv("CORS_ORIGINS", "*").split(",")
+		self.CORS_ORIGINS = [o.strip() for o in cors if o.strip()]
 
 
 settings = Settings() 
