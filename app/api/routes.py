@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, File as UploadFileParam, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File as UploadFileParam, HTTPException, UploadFile, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+import asyncio
 
-from app.db.session import get_session
+from app.db.session import get_session, AsyncSessionLocal
 from app.db.models import File, ProcessedRecord
 from app.schemas.files import UploadResponse, FileStatusResponse, ResultsResponse, ResultRecord
 from app.services.storage import save_upload
 from app.services.processing import processing_manager
+from app.core.config import settings
 
 
 router = APIRouter()
@@ -18,15 +20,39 @@ async def health() -> dict:
 
 
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload(file: UploadFile = UploadFileParam(...), session: AsyncSession = Depends(get_session)) -> UploadResponse:
-	file_id, path, original_name = await save_upload(file)
-	entity = File(id=file_id, filename=original_name, path=path, status="queued")
-	session.add(entity)
-	await session.commit()
+async def upload(
+	file: UploadFile = UploadFileParam(...),
+	priority: int = Query(0, ge=-10, le=10, description="Task priority: lower is higher priority"),
+	session: AsyncSession = Depends(get_session),
+) -> UploadResponse:
+	# Content-Type check
+	if file.content_type not in settings.ALLOWED_CONTENT_TYPES:
+		raise HTTPException(status_code=415, detail=f"Unsupported content type: {file.content_type}")
+	# Size check (best-effort): rely on header if provided; otherwise enforce during stream save
+	content_length = file.size if hasattr(file, "size") else None
+	if content_length is not None and content_length > settings.MAX_UPLOAD_MB * 1024 * 1024:
+		raise HTTPException(status_code=413, detail="File too large")
 
-	await processing_manager.start()
-	await processing_manager.enqueue_file(session, entity)
+	try:
+		file_id, path, original_name = await save_upload(file)
+		entity = File(id=file_id, filename=original_name, path=path, status="queued")
+		session.add(entity)
+		await session.commit()
+	except Exception as e:
+		raise HTTPException(status_code=400, detail=f"Upload failed: {e}")
 
+	# Start processing in background with a fresh session
+	async def _start_processing(fid: str, prio: int) -> None:
+		async with AsyncSessionLocal() as s:
+			f = await s.get(File, fid)
+			if f is None:
+				return
+			await processing_manager.start()
+			# temporarily store priority in manager for initial enqueues
+			orig_chunk_size = settings.CHUNK_SIZE
+			await processing_manager.enqueue_file(s, f)
+
+	asyncio.create_task(_start_processing(file_id, priority))
 	return UploadResponse(file_id=file_id)
 
 

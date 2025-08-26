@@ -30,6 +30,14 @@ class Settings:
 		self.BASE_BACKOFF = float(os.getenv("BASE_BACKOFF", "1.0"))
 		self.MAX_BACKOFF = float(os.getenv("MAX_BACKOFF", "30.0"))
 		self.DELETE_FILE_ON_COMPLETE = os.getenv("DELETE_FILE_ON_COMPLETE", "false").lower() == "true"
+		# CORS: comma-separated origins; use "*" to allow all
+		cors = os.getenv("CORS_ORIGINS", "*").split(",")
+		self.CORS_ORIGINS = [o.strip() for o in cors if o.strip()]
+		# Upload constraints
+		self.MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+		self.ALLOWED_CONTENT_TYPES = [
+			ct.strip() for ct in os.getenv("ALLOWED_CONTENT_TYPES", "text/csv,application/csv").split(",") if ct.strip()
+		]
 
 
 settings = Settings() 
