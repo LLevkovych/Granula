@@ -1,33 +1,50 @@
-version: "3.8"
-
 services:
-  db:
+  postgres:
     image: postgres:15
     container_name: granula-postgres
-    restart: unless-stopped
     environment:
-      POSTGRES_DB: granula
-      POSTGRES_USER: granula_user
-      POSTGRES_PASSWORD: granula_pass
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U granula_user -d granula"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - granula_network
 
-  adminer:
-    image: adminer:4
-    container_name: granula-adminer
-    restart: unless-stopped
+  app:
+    build: .
+    container_name: granula-app
+    env_file:
+      - .env
+    environment:
+      # Fallback if .env not provided
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://postgres@postgres:5432/postgres}
+      MAX_CONCURRENCY: ${MAX_CONCURRENCY:-10}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-4}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-0}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-60}
     depends_on:
-      - db
+      postgres:
+        condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8000:8000"
+    networks:
+      - granula_network
+    restart: unless-stopped
+
+networks:
+  granula_network:
+    driver: bridge
 
 volumes:
-  pgdata:
-    name: granula-pgdata 
+  postgres_data: 

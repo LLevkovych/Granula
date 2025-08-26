@@ -1,11 +1,23 @@
+# FastAPI and server
 fastapi>=0.111,<0.116
 uvicorn[standard]>=0.23,<0.31
+
+# Database
 sqlalchemy>=2.0,<2.1
-aiofiles>=23.2,<24.0
+asyncpg>=0.29,<0.31
 aiosqlite>=0.19,<0.21
-python-multipart>=0.0.6,<0.0.10
 alembic>=1.13,<2.0
+
+# File handling
+aiofiles>=23.2,<24.0
+python-multipart>=0.0.6,<0.0.10
+
+# Testing
 httpx>=0.24,<0.28
-pytest==7.4.4
-pytest-asyncio==0.21.1
-asyncpg>=0.29,<0.30 
+pytest>=8.2,<8.3
+pytest-asyncio>=0.23.6,<0.24
+
+# Development (optional)
+black>=23.0,<24.0
+flake8>=6.0,<7.0
+mypy>=1.5,<2.0 
