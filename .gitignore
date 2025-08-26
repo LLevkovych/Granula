@@ -139,7 +139,21 @@ dmypy.json
 Thumbs.db
 
 # Project specific
-uploads/
-*.db
-*.sqlite
-*.sqlite3
+storage/uploads/
+storage/*.db
+storage/*.sqlite
+storage/*.sqlite3
+storage/*.db-*
+storage/*.db-shm
+storage/*.db-wal
+
+# Docker
+.dockerignore
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
